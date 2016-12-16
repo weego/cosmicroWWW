@@ -18,4 +18,8 @@ q.iconMouseToKill = HID.open('USB_1d03_001a_14100000', 7427, 26);
 
 HID.findAvailable;
 q=q?();
-try{ q.iconMouseToKill = HID.open( 7427, 26 ); };
+// q.iconMouseToKill =
+try{
+	q.iconMousesToKill = HID.findBy( 7427, 26 );
+	q.iconMousesToKill.do(_.open);
+};
