@@ -1,0 +1,382 @@
+/*
+receiver for face recognition program FaceOsc.
+
+The Mangle Of Practice, Pickering - Joel Ryan tip
+
+ToDo:
+- activate OSC sending ONLY After few steps ol calib!!!
+it keeps killing sound!
+
+
+ToDo, Amsterdam 2014April:
+
+- finish autoscale
+- FuncChain for bloody OSCdef !
+- make nice dict foe all OSC data:
+- key
+- currentVal
+- OSCdef
+- guislider
+- minVal, maxVal
+- ACfunc
+- SkipJack
+
+
+
+List of input OSC data:
+[ '/found', 1 ]
+[ '/pose/scale', 5.4366450309753 ]
+[ '/gesture/mouth/width', 12.573709487915 ]
+[ '/gesture/mouth/height', 1.4679493904114 ]
+[ '/gesture/eyebrow/left', 6.8860459327698 ]
+[ '/gesture/eyebrow/right', 6.836968421936 ]
+[ '/gesture/eye/left', 3.5579600334167 ]
+[ '/gesture/eye/right', 3.4778361320496 ]
+[ '/gesture/jaw', 18.993074417114 ]
+[ '/gesture/nostrils', 6.8200149536133 ]
+[ '/pose/position', 311.60662841797, 324.24407958984 ] // this is 2 dim
+[ '/pose/orientation', 0.13642460107803, -0.028923885896802, 0.16862623393536 ] // this is 3d
+
+Functions in MFuncs to dis-/en-able:
+- Broadcast
+- Whawha
+- Mute
+- AutoCal
+- paint
+
+funnc.disable(name)
+q.foDisableAll = { q.faceDict.keysValuesDo({|key, subdict| var func = subdict.resp.func; func.names.do(func.disable(_) )}) }
+q.foDisableAll;
+*/
+
+(
+q = q ? ();
+q.views = q.views  ? ();
+
+q.oscs = [
+	'/found',
+	'/gesture/eyebrow/left',
+	'/gesture/mouth/width',
+	'/gesture/eye/left',
+	'/gesture/eyebrow/right',
+	'/gesture/eye/right',
+	'/gesture/nostrils',
+	'/gesture/jaw',
+	'/pose/scale',
+	'/gesture/mouth/height'
+].sort;
+q.oscs.size;
+q.faceDict = ();
+// each of these OSC paths becomes a key in faceDict. Under each key, a lot of data is stored;specs, a MFunc, and more
+q.oscs.do({|path| q.faceDict.put(
+	path, (currentVal: 0,
+		currentNormVal: 0,
+		spec: ControlSpec(999999, -999999, \lin) // reversed for autocalibration
+	)
+)
+});
+
+// make all responders with a MFunc at once!
+q.faceDict.keysValuesDo({|key, subdict|
+	var funC = MFunc([
+		\cache, {|msg, time, addr, recvPort|
+			q.faceDict[key].put(\currentVal, msg[1]);
+		},
+		\cacheNorm, {|msg, time, addr, recvPort|
+			q.faceDict[key].put(\currentNormVal, subdict[\spec].unmap(msg[1]) );
+		},
+		\acFunc, {|msg|
+			var val = msg[1];
+			var spec = subdict[\spec];
+			if(val < spec.minval){
+				// postf("new minval % for %\n", val, key);
+				defer { spec.minval_(val)};
+			};
+			if(val > spec.maxval){
+				// postf("new MAXval % for %\n", val, key);
+				defer { spec.maxval_(val)};
+			};
+		}
+	]);
+	// e.o. MFunc
+	// just need dis now:
+	funC
+	.enable(\acFunc)
+	.disable(\cacheNorm);
+
+	// kick the MFunc into the OscDef's func slot:
+	subdict.put(\resp,
+		OSCdef(key, funC, key, nil).enable.permanent_(true);
+	);
+});
+
+);
+
+// it's good as a func to call just after pressing the AutoCal Button
+q.resetSpex = {
+	Routine({
+		q.faceDict.do{ |dict, key|
+			dict.resp.func.disable(\bcFunc);
+			dict[\spec].minval_(996699).maxval_(-996699);
+		};
+		while{q.faceDict['/found'][\currentVal] == 0} {0.05.wait};
+		1.wait;
+		q.faceDict.do { |dict| dict.resp.func.enable(\bcFunc) };
+	}).play(AppClock);
+
+};
+
+// util to measure timing
+(
+q.oldTime = thisThread.seconds;
+q.faceDict.at('/pose/scale').resp.func.add( \gettiming,
+	{|msg|
+		var time = msg[1], delta;
+		time = thisThread.seconds;
+		delta = (time - q.oldTime).round(0.001);
+		postf("FaceOSC firing at % intervals; = % Hz\n", delta, (1/delta).round(0.01));
+		q.oldTime = time;
+	}
+);
+);
+q.faceDict.at('/pose/scale').resp.func.enable( \gettiming);
+q.faceDict.at('/pose/scale').resp.func.disable( \gettiming);
+/*
+
+q.faceDict.do({|pa| pa.resp.func.disable(\cache) });
+q.faceDict.do({|pa| pa.resp.func.enable(\cache) });
+q.faceDict.do({|pa| pa.resp.func.disable(\acFunc) });
+q.faceDict.do({|pa| pa.resp.func.enable(\acFunc) });
+
+*/
+////////////////////////////////////////////////////////////////////////
+////  1  -  gui  ///////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+(
+try{ q.views.faceOsc.close };
+q.views.faceOsc = Window("Face OSC in", Rect(0, 255, 460, 362)).front;
+q.views.faceOsc.addFlowLayout;
+
+Button(q.views.faceOsc, Rect(0,0, 450*0.91, 30)).states_([
+	["Auto Calibrating", Color.black, Color.red],
+	["wanna calibrate?", Color.black, Color.gray]
+]).action_({ arg butt;
+	[{	"turn ON AC".postln;
+		q.resetSpex;		// clear spex
+		q.faceDict.do { |dict| dict.resp.func.enable(\acFunc) };
+	},{"  turn OFF autocal".postln;
+		q.faceDict.do { |dict| dict.resp.func.disable(\acFunc) };
+	}][butt.value].value;
+});
+
+Button(q.views.faceOsc, Rect(0,0, 450*0.07, 30)).states_([
+	["BC", Color.black, Color.red],
+	["int", Color.black, Color.gray]
+]).action_({ arg butt;
+	[{
+		q.net.faceOscAddr = q.net.broad;
+	},{
+		q.net.faceOscAddr = q.net.local;
+	}][butt.value].value;
+		"sending to: ".post; q.net.faceOscAddr.hostname.postln;
+}).value_(1);
+
+Button(q.views.faceOsc, Rect(0,0, 450*0.3, 30)).states_([
+	["Influx Broadcast", Color.black, Color.red],
+	["wanna Broadcast?", Color.black, Color.gray]
+]).action_({ arg butt;
+	[{	"adding BC".postln;
+		q.faceDict.do({|pa| pa.resp.func.enable(\bcFunc) });
+	},{"  removing BC".postln;
+		q.faceDict.do({|pa| pa.resp.func.disable(\bcFunc) });
+	}][butt.value].value;
+}).value_(0);
+
+Button(q.views.faceOsc, Rect(0,0, 450*0.3, 30)).states_([
+	["Wahwah on", Color.black, Color.red],
+	["wanna wahwah?", Color.black, Color.gray]
+]).action_({ arg butt;
+	[{	"adding wahwah".postln;
+		// doesnt check if func slot is present in all OscDefs
+		q.faceDict.do { |dict| dict.resp.func.enable(\wahwah) };
+	},{"  removing wahwah".postln;
+		q.faceDict.do { |dict| dict.resp.func.disable(\wahwah) };
+	}][butt.value].value;
+}).value_(1);
+
+Button(q.views.faceOsc, Rect(0,0, 450*0.3, 30)).states_([
+	["found > mutes", Color.black, Color.red],
+	["wanna MUTE?", Color.black, Color.gray]
+]).action_({ arg butt;
+	[{	"adding Found Mutes".postln;
+		q.faceDict['/found'].resp.func.enable(\foundMutes);
+	},{"  removing Found Mutes".postln;
+		q.mfx.fx.pxChain.proxy.set(\llag, 0.1, \level, 1);
+		q.faceDict['/found'].resp.func.disable(\foundMutes);
+	}][butt.value].value;
+}).value_(1);
+
+Button(q.views.faceOsc, Rect(0,0, 450*0.07, 30)).states_([
+	[".app", Color.black, Color.red]
+]).action_({ q.openFaceOSC; });
+
+
+// the sliders per for each
+q.faceDict.keys.asArray.sort.do({|key, i|
+	var subdict = q.faceDict[key];
+	subdict.put(\guiSlider,
+		EZSlider(q.views.faceOsc, Rect(0, 0, 450, 25),
+			key.asString.keep(-18),
+			subdict.spec,
+			labelWidth: 140, numberWidth: 60
+		)
+	);
+});
+
+q.guiJack = SkipJack({
+	q.faceDict.do({|subdict, key| subdict[\guiSlider].value = subdict[\currentVal]})
+}, 0.15, q.views.faceOsc.isClosed, "guiJack").start;
+
+
+);
+
+////////////////////////////////////////////////////////////////////////
+////  1.3  paint window when found //////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+(
+q.paintColFO = 0.5;
+q.faceDict['/found'].resp.func.add(\foundPaints, {|msg|
+	if(msg[1] == 1) {
+		q.paintColFO =(q.paintColFO + 0.01);
+		defer{ q.views.faceOsc.background_(Color.new(q.paintColFO.fold(0.2,1), 0.5, 0.05));}
+	}{
+		defer{q.views.faceOsc.background_(Color.grey(0.6));};
+	}
+});
+q.faceDict.at('/found').resp.func.enable(\foundPaints);
+);
+////////////////////////////////////////////////////////////////////////
+////  1.6  Influx BC ///////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+// this is in Network config!
+// have NW on !!!
+// NetAddr.broadcastFlag_(true);
+// q.net.broad = NetAddr("255.255.255.255", NetAddr.langPort);
+// q.net.local= NetAddr("127.0.0.1", NetAddr.langPort); // doofy for local
+
+q.net.faceOscAddr = q.net.local;  // send in pr out ways?
+(
+[
+	'/gesture/mouth/width',
+	'/gesture/mouth/height',
+	'/pose/scale',
+	// '/gesture/eyebrow/left',
+	// '/gesture/eyebrow/right',
+	'/gesture/eye/left',
+	'/gesture/eye/right',
+	// '/gesture/jaw'
+].do({|it, i|
+	var subdict = q.faceDict[it];
+	var goals = #[\x, \y, \z, \r, \s, \t, \u, \v, \w];
+	var spec = subdict[\spec];
+	subdict.resp.func.add(\bcFunc, {|msg|
+		q.net.faceOscAddr.sendMsg("/oo", \trinflux, \set,
+			goals.wrapAt(i), spec.unmap(msg[1]).unibi
+		);
+	});
+})
+);
+
+
+
+////////////////////////////////////////////////////////////////////////
+////  4  -  extra mapped funcs for wah wah, turn them all OFF by default ////////////
+////////////////////////////////////////////////////////////////////////
+
+{
+	var subdict = q.faceDict['/pose/scale'];
+	subdict.resp.func.add(\wahwah, {|msg|
+		Ndef(\n6_faceMod).set(\gainF,
+			\gainF.asSpec.map(subdict.spec.unmap(msg[1])
+		) );
+	});
+}.value;
+/*{
+	var subdict = q.faceDict['/gesture/mouth/width'];
+	subdict.resp.func.add(\wahwah, {|msg|
+		Ndef(\n6_faceMod).set(\res, \res.asSpec.map(subdict.spec.unmap(msg[1]) ) );
+		Ndef(\n6_faceMod).set(\qu, \qu.asSpec.map(subdict.spec.unmap(msg[1]) ) )
+	});
+}.value;
+q.faceDict['/gesture/mouth/width'].resp.func.disable(\wahwah);
+*/
+{
+	var subdict2 = q.faceDict['/gesture/mouth/height'];
+	subdict2.resp.func.add(\wahwah, {|msg|
+		Ndef(\n6_faceMod).set(\morph, \morph.asSpec.map(subdict2.spec.unmap(msg[1])) )
+	});
+}.value;
+
+q.faceDict['/found'].resp.func.add(\wahwah, {|msg|
+	var val = msg[1];
+	if(val == 1)
+	{
+		Ndef(\n6_faceMod).set(\wet70, 0.95);
+
+	}{
+		Ndef(\n6_faceMod).set(\wet70, 0.5 );
+
+		if(	Ndef(\n6_faceMod).get(\morph).isKindOf(Number) ){
+			Ndef(\n6_faceMod).map(\morph, Ndef(\forMod));
+		}
+	}
+});
+
+q.faceDict['/found'].resp.func.add(\foundMutes, {|msg|
+	if(msg[1] == 1) {
+		q.mfx.fx.pxChain.proxy.set(\llag, 0.1, \level, 1);
+	}{
+		q.mfx.fx.pxChain.proxy.set(\llag, 0.5, \level, 0.01);
+	}
+});
+// but not now !!!
+q.faceDict.do { |dict| try{dict.resp.func.disable(\wahwah)}};
+q.faceDict['/found'].resp.func.disable(\foundMutes);
+try{ q.mfx.fx.pxChain.proxy.set(\llag, 0.1, \level, 1) };
+
+
+////////////////////////////////////////////////////////////////////////
+//////////  e.o. 4  -    ///////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+
+
+
+
+// FaceOsc oeffnen:
+// open FaceOSC only if on OSX !
+// auto script that edits OFaceOSC's .xml file so it sends to the correct port number.
+q.openFaceOSC = {
+	var xmlString, oldIPstring, newIPstring;
+	var path = "/Applications/FaceOSC/FaceOSC.app";
+	var port = NetAddr.langPort;
+	var xmlPath = path ++ "/Contents/data/settings.xml";
+	if( File.exists(xmlPath) ) {
+		File.use(xmlPath, "r", { |f| xmlString = f.readAllString });
+		oldIPstring = xmlString.copyRange(xmlString.find("<port>") + 6, xmlString.find("</port>") - 1);
+		newIPstring = NetAddr.langPort.asString;
+		if(oldIPstring != newIPstring){
+			"replacing IP/port Addresses in FaceOSCs XML file".postln;
+			xmlString = xmlString.replace(
+				oldIPstring,
+				newIPstring
+			);
+			File.use(xmlPath, "w", { |f| f.write(xmlString) });
+		}{
+			"IP/port Addresses in FaceOSCs XML file is OK !-)".postln;
+		}
+	};
+	{ path.openOS }.defer(0.5);
+};
+q.openFaceOSC;
+
+"FaceOSC setup loaded"

@@ -1,0 +1,116 @@
+/*
+iCon set Volumes via CCResponder s
+
+
+similo with Buttons up and down:
+- 			open in NdefMixer / select as q.currentMixerPx
+NO 			start/stop
+
+similo with knobs:
+no 			set params on q.currentMixerPx
+
+per knob: 	one Axis of Influx. Problem: influx needs attach/detach .... ONE INFLUX EACH ??
+per butt: 	one seed change [xset, set interval with last Knob]
+
+per knob: preset morph
+per butt 1	:next morph goal
+per butt 2	:xfade to new RandSet ? [xset, set dt interval with last Knob]
+
+REW/FF		:increment direction for preset/&/seed
+
+per butt: 	attach/detach influx;
+joystick:	2 influx axes, would be way cool! (better within Modality!!)
+
+
+SCENE 1:
+kn 		cc 12
+fad: 	cc 13
+
+ButU 27
+ButD 26
+
+21, 24, 22
+20, 23, 25
+
+*/
+
+
+q=q?();
+q.faderbox = q.faderbox ? ();
+q.faderbox.seedInc = 1;
+
+/*
+CCResponder.removeAll; NoteOnResponder.removeAll;
+*/
+(
+// REV FWD > move seed around
+NoteOnResponder(
+	{|s,c,num,vel| q.faderbox.seedInc = -1}, nil,
+	0, // chan
+	21
+);
+NoteOnResponder(
+	{|s,c,num,vel| q.faderbox.seedInc = 1}, nil,
+	0, // chan
+	22
+);
+NoteOnResponder(
+	{|s,c,num,vel| q.faderbox.seedInc = nil}, nil,
+	0, // chan
+	24
+);
+);
+(
+// SLIDER > VOL
+q.getActivePxsAsList.do{|px, i|
+
+	CCResponder(
+		{  |src,chan,num,val| q.gpFuncs.volFunc(px, (val/127).squared) },
+		nil,
+		i, // chan
+		13
+	);
+
+	// KNOB > MORPH
+	CCResponder(
+		{  |src,chan,num,val|
+			var pres = px.getHalo(\nodeProxyPreset);
+			val = val/127;
+			pres.morph(val, pres.currSet.key, pres.targSet.key);
+		},
+		nil,
+		i, // chan
+		12
+	);
+
+	// BUT LOW > Seed Increment
+	NoteOnResponder( // seed shift with inc 1, for now...
+		{|s,c,num,vel|
+			q.gpFuncs.incSeed(px, q.trinflux, q.faderbox.seedInc.postln ? 0, false, 0.9, false);
+		}, nil,
+		i, // chan
+		26
+	);
+
+	// BUT UP > morph target!
+	NoteOnResponder(
+		{|s,c,num,vel|
+			var pres = px.getHalo(\nodeProxyPreset);
+			// pres.setTarg(pres.getSetNames.choose.postln);
+
+			'nu morph target:'.postln;
+			pres.setTarg( // ugly hack to get name.
+				// Preset shd have method .setTargByIndex
+				pres.getSetNames.at(
+					(pres.targIndex ? 0 + q.faderbox.seedInc)
+					.wrap(1, pres.getSetNames.size-1).post
+				).postc
+			).postcln;
+
+			pres.prepMorph;
+		}, nil,
+		i, // chan
+		27
+	);
+}
+);

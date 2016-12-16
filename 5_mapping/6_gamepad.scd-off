@@ -1,0 +1,194 @@
+///// connect GamePad like 2nd Ferrari: wireless one does it NOT yet!
+// please keep left green light on, right none !
+// just MetaKtl
+/*
+ToDo:
+
+- KtLoop all.
+
+- BUT How To manage Preset stuff ? NOT !
+.only the one in foregr.
+.infl stuff may inƒluenxe others, too
+*/
+try{
+	q=q?();
+	// MKtl.find;/// wait ... please ...
+	// MKtl(\ferr).free;
+	MKtl(\ferr, "*drive");
+	q.ferr = MKtl(\ferr);
+	/*
+	q.ferr.trace;
+	q.ferr.trace(false);
+	*/
+	//// there's funcs for these in 8_Gamepad_funcs ! ////
+
+	// start/stop
+	q.ferr.elAt('bt', '6').action = ({|el|
+		if(el.value==1){
+			q.gpFuncs.startStopToggle( q.currFerrPx );
+		}
+	});
+
+	// vol
+	q.ferr.elAt('throt', 'r').action = ({|el|
+		q.gpFuncs.volFunc(q.currFerrPx, el.value.squared);
+	});
+
+	// choose active PX ! 7 possibilities, 8th is bad. shift button for more if not enough.
+	// odd nrs are hard to catch; hmmm. increment?
+	(
+		q.ferr.elAt('compass').action = ({|el|
+			// el.deviceValue.postcln;
+			var val = (el.deviceValue * 7).round.asInteger;
+			var chosen;
+			if(val < 7){
+				// val.postcln;
+				chosen = q.getActivePxsAsList.wrapAt(val);
+				if(chosen.notNil){
+					q.currFerrPx = chosen;
+					"selected Px: %\n".postf(q.currFerrPx);
+					// manage Influx: detach all,
+					q.getActivePxsAsList.do({ |pxn| q.trinflux.detach(pxn) });
+					// just attach the one. Not faceMod
+					if(chosen != Ndef(\n6_faceMod)){
+						q.trinflux.attachMapped( q.currFerrPx  );
+					};
+					q.centerToCurrent(q.trinflux, q.currFerrPx);
+					// manage uniwin GUI:
+					defer{
+						q.switchPxINGui(q.currFerrPx);
+						q.views.presetWin.addHalo(\active1, val);
+					};
+				}{ "no proxy here".warn }
+			}
+		})
+	);
+
+	// cache button 9 as shift button. Same for left shldr.
+	q.gpFuncs.shift9 = false;
+	q.ferr.elAt('bt','9').action = ({|el|
+		q.gpFuncs.shift9 = el.value >= 1;
+	});
+
+	///////////////////////////
+	//// PRESET MANAGEMENT ////
+	///////////////////////////
+
+	// function macros are in file 4_inphlukx.scd
+
+	// right quartet: N/S for preset change; b9 shifts to greater increment
+	q.ferr.elAt('bt', '4').action = ({|el|
+		if(el.value==1){
+			// var inc = 1;
+			// if(q.gpFuncs.shift9){inc=inc*10};
+			// q.centerToNewPreset(
+			// 	q.trinflux,
+			// 	q.currFerrPx,
+			// 	q.incrementPreset(q.currFerrPx, inc)
+			// );
+			q.gpFuncs.incPreset(q.currFerrPx, q.trinflux, 1, q.gpFuncs.shift9);
+	}});
+	q.ferr.elAt('bt', '2').action = ({|el|
+		if(el.value==1){
+			// var inc = -1;
+			// if(q.gpFuncs.shift9){inc=inc*10};
+			// q.centerToNewPreset(
+			// 	q.trinflux,
+			// 	q.currFerrPx,
+			// 	q.incrementPreset(q.currFerrPx, inc)
+			// );
+			q.gpFuncs.incPreset(q.currFerrPx, q.trinflux, -1, q.gpFuncs.shift9);
+	}});
+
+	// right quartet: W/E for random preset xset; b9 shifts to greater increment
+	q.ferr.elAt('bt', '1').action = ({|el|
+		if(el.value==1){ var inc = -1;
+			// if(q.gpFuncs.shift9){inc=inc*10};
+			// q.centerToNewRandSeed(
+			// 	q.trinflux,
+			// 	q.currFerrPx,
+			// 	q.incrementSeed(q.currFerrPx, inc)
+			// );
+			q.gpFuncs.incSeed(q.currFerrPx, q.trinflux, -1, q.gpFuncs.shift9);
+	}});
+	q.ferr.elAt('bt', '3').action = ({|el|
+		if(el.value==1){ var inc = 1;
+			// if(q.gpFuncs.shift9){inc=inc*10};
+			// q.centerToNewRandSeed(
+			// 	q.trinflux,
+			// 	q.currFerrPx,
+			// 	q.incrementSeed(q.currFerrPx, inc)
+			// );
+			q.gpFuncs.incSeed(q.currFerrPx, q.trinflux, 1, q.gpFuncs.shift9);
+	}});
+	//// random preset RESET////
+	q.ferr.elAt('bt', '10').action = ({|el|
+		if(el.value==1){
+			var seed = 0;
+			var px = q.currFerrPx;
+			px.addHalo(\seed, seed);
+			postf("re-set to new Seed set % \n", seed );
+			q.centerToNewRandSeed(
+				q.trinflux,
+				px,
+				seed, 1
+			);
+		}
+	});
+
+
+
+	// influx on JoyStix:
+	(
+		// right Joy: continuous
+		q.ferr.elAt(\joy, 'r', 'x').action = ({|el|
+			q.trinflux.inScaler = 0.6;
+			q.trinflux.set(\x, el.value.unibi);
+		});
+		q.ferr.elAt(\joy, 'r', 'y').action = ({|el| var val = el.value;
+			q.trinflux.inScaler = 0.6;
+			// mid: 0.61176472902298, min:0.054901961237192
+			// val = val.bilin(0.61176472902298, 0.57254904508591, 1, 0.5, 1, -1).postln;
+			val = val.unibi.neg;
+			q.trinflux.set(\y, val)
+		})
+
+	);
+
+	// left Joy: just a field of 25 steps
+	q.ferr.elAt(\joy, 'l', 'x').action = ({|el|
+		q.trinflux.inScaler = 0.6;
+		q.trinflux.set(\v, el.value.round(1/5).unibi);
+	});
+	q.ferr.elAt(\joy, 'l', 'y').action = ({|el|
+		q.trinflux.inScaler = 0.6;
+		q.trinflux.set(\w, el.value.round(1/5).unibi.neg )
+	});
+
+	// wheel left: : quant'd to 12 steps
+	q.ferr.elAt(\wheel).action = ({|el|
+		q.trinflux.inScaler = 1.5;
+		q.trinflux.set(\u, el.value.round(1/12).unibi;
+	)});
+	q.ferr.elAt('throt', 'l').action = ({|el|
+		q.trinflux.inScaler = 1.5;
+		q.trinflux.set(\z, el.value);
+	});
+
+	/*
+	manage this trinflux mapping somehow (in gamepad?? ugly!
+	q.trinflux.attachMapped( p[ \n6_faceMod ] );
+	q.trinflux.detach(\n6_faceMod);
+	*/
+	(
+		// fixed for now...
+		q.trinflux.attachMapped(Ndef(\n6_faceMod), paramNames: [
+			\pregain, \dFreq,
+			\morph, \res, \qu,
+			\mainDT, \glide, \feedbT, \revDecay, \revTime, \modulation,
+			\secs, \pitch1, \flip, \freeze,
+			\elefRate, \interval, \speed
+		]);
+	);
+
+}
